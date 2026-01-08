@@ -1,0 +1,12 @@
+click>=8.0
+feedparser>=6.0
+python-dateutil>=2.8
+openai>=1.0
+httpx>=0.25
+pyyaml>=6.0
+python-dotenv>=1.0
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.1
+google-auth>=2.23
+textblob>=0.17.0
+spacy>=3.7.0

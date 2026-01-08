@@ -1,0 +1,17 @@
+feeds:
+  - name: "Associated Press"
+    url: "https://feedx.net/rss/ap.xml"
+    priority: 1
+
+  - name: "BBC World"
+    url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+    priority: 1
+
+  - name: "Euronews"
+    url: "https://www.euronews.com/rss"
+    priority: 2
+
+settings:
+  min_content_length: 150
+  max_age_hours: 24
+  dedup_window_hours: 72
