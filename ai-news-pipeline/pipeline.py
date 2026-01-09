@@ -15,17 +15,22 @@ class Pipeline:
         self.settings = settings
         self.db = Database(settings.database_path)
         self.ingestor = RSSIngestor(self.db, settings.min_content_length, settings.max_age_hours)
-        self.scorer = ContentScorer()
+        self.scorer = ContentScorer(
+            require_hard_news=settings.require_hard_news,
+            fluff_penalty_multiplier=settings.fluff_penalty_multiplier
+        )
         self.script_gen = ScriptGenerator(settings.openai_api_key, settings.prompt_path)
         self.renderer = HeyGenRenderer(
             HeyGenConfig(settings.heygen_api_key, settings.heygen_avatar_id, settings.heygen_voice_id),
             settings.video_output_dir
         )
-        self.distributor = YouTubeDistributor(YouTubeCredentials(
+        # Lazy initialization - only create when needed
+        self._distributor = None
+        self._distributor_creds = YouTubeCredentials(
             settings.youtube_client_id,
             settings.youtube_client_secret,
             settings.youtube_refresh_token
-        ))
+        )
         self.feeds = self._load_feeds()
 
     def _load_feeds(self) -> list[dict]:
@@ -33,15 +38,41 @@ class Pipeline:
         with open(feeds_path) as f:
             return yaml.safe_load(f)["feeds"]
 
+    @property
+    def distributor(self):
+        """Lazy-load YouTube distributor only when needed"""
+        if self._distributor is None:
+            if not self._distributor_creds.refresh_token:
+                raise ValueError("YOUTUBE_REFRESH_TOKEN is required for YouTube operations. Run 'python cli.py auth' to get one.")
+            self._distributor = YouTubeDistributor(self._distributor_creds)
+        return self._distributor
+
     def ingest(self, limit: int = 10) -> list[ContentItem]:
         items = []
+        skipped_dedup = 0
+        skipped_length = 0
+        skipped_age = 0
+
+        print(f"\n[FETCHING] Reading RSS feeds (limit: {limit})...")
+
         for feed in sorted(self.feeds, key=lambda f: f.get("priority", 99)):
+            print(f"  Fetching: {feed['name']}")
+
             for item in self.ingestor.fetch(feed["url"], feed["name"]):
                 self.db.save(item)
                 items.append(item)
-                print(f"[INGESTED] {item.title[:60]}...")
+                print(f"  ✓ [INGESTED] {item.title[:60]}...")
                 if len(items) >= limit:
+                    print(f"\n[RESULT] Ingested {len(items)} new articles\n")
                     return items
+
+        print(f"\n[RESULT] Ingested {len(items)} new articles")
+        if len(items) == 0:
+            print(f"[INFO] All articles were filtered (already exist, too short, or too old)")
+            print(f"[TIP] Run 'python cli.py reset' to clear the database\n")
+        else:
+            print()
+
         return items
 
     def score_content(self, limit: int = 20) -> list[ContentItem]:
@@ -54,8 +85,14 @@ class Pipeline:
             return []
 
         items = self.db.get_by_status(Status.INGESTED, limit)
+        if len(items) == 0:
+            print("[INFO] No items to score")
+            return []
+
+        print(f"\n[SCORING] Evaluating {len(items)} articles (threshold: {self.settings.min_content_score})")
         scored = []
         skipped_count = 0
+        skipped_details = []
 
         for item in items:
             try:
@@ -66,37 +103,69 @@ class Pipeline:
                 if self.scorer.is_worthy(score, self.settings.min_content_score):
                     item.status = Status.SCORED
                     self.db.save(item)
-                    print(f"[SCORED] {score:.1f}/100 - {item.title[:50]}...")
+                    category = breakdown.get('news_category', 'N/A')
+                    print(f"✓ [SCORED] {score:.1f}/100 [{category}] {item.title[:55]}...")
                     scored.append(item)
                 else:
                     item.status = Status.SKIPPED
                     self.db.save(item)
                     skipped_count += 1
+                    category = breakdown.get('news_category', 'N/A')
+                    skipped_details.append((score, category, item.title[:50]))
 
             except Exception as e:
                 item.error = str(e)
                 item.status = Status.FAILED
                 self.db.save(item)
-                print(f"[FAILED] Scoring: {e}")
+                print(f"✗ [FAILED] Scoring: {e}")
 
         if skipped_count > 0:
-            print(f"[SKIPPED] {skipped_count} items below threshold ({self.settings.min_content_score})")
+            print(f"\n✗ [SKIPPED] {skipped_count} items below threshold ({self.settings.min_content_score}):")
+            for score, category, title in skipped_details[:5]:  # Show first 5
+                print(f"  - {score:.1f}/100 [{category}] {title}...")
+            if len(skipped_details) > 5:
+                print(f"  ... and {len(skipped_details) - 5} more")
 
+        print(f"\n[RESULT] {len(scored)} articles passed, {skipped_count} skipped\n")
         return scored
 
     def generate_scripts(self, limit: int = 5) -> list[ContentItem]:
         # Use SCORED items if scoring enabled, otherwise INGESTED
         status = Status.SCORED if self.settings.enable_scoring else Status.INGESTED
         items = self.db.get_by_status(status, limit, order_by_score=self.settings.enable_scoring)
+
+        # Auto-score if scoring enabled but no scored items found
+        if self.settings.enable_scoring and len(items) == 0:
+            ingested_items = self.db.get_by_status(Status.INGESTED, limit=50)
+            if len(ingested_items) > 0:
+                print(f"[INFO] No scored items found. Auto-scoring {len(ingested_items)} ingested items...")
+                self.score_content(limit=len(ingested_items))
+                items = self.db.get_by_status(Status.SCORED, limit, order_by_score=True)
+                if len(items) == 0:
+                    print(f"[WARNING] No items passed scoring threshold ({self.settings.min_content_score})")
+                    return []
+            else:
+                print(f"[INFO] No items available for script generation (looking for status: {status.value})")
+                return []
+
         processed = []
 
         for item in items:
             try:
+                print(f"\n{'='*80}")
+                print(f"[GENERATING SCRIPT] {item.title}")
+                score_str = f" [Score: {item.content_score:.1f}]" if item.content_score else ""
+                print(f"{'='*80}")
+
                 item.script = self.script_gen.generate(item)
                 item.status = Status.SCRIPTED
                 self.db.save(item)
-                score_str = f" [Score: {item.content_score:.1f}]" if item.content_score else ""
-                print(f"[SCRIPTED]{score_str} {item.title[:60]}...")
+
+                print(f"\n[SCRIPT{score_str}]")
+                print(f"{'-'*80}")
+                print(item.script)
+                print(f"{'-'*80}\n")
+
                 processed.append(item)
             except Exception as e:
                 item.error = str(e)

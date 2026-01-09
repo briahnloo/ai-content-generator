@@ -31,6 +31,8 @@ class Settings:
     # Content Scoring
     min_content_score: float
     enable_scoring: bool
+    require_hard_news: bool
+    fluff_penalty_multiplier: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -49,6 +51,8 @@ class Settings:
             min_content_length=int(os.environ.get("MIN_CONTENT_LENGTH", "150")),
             max_age_hours=int(os.environ.get("MAX_AGE_HOURS", "24")),
             max_retries=int(os.environ.get("MAX_RETRIES", "3")),
-            min_content_score=float(os.environ.get("MIN_CONTENT_SCORE", "50.0")),
-            enable_scoring=os.environ.get("ENABLE_SCORING", "true").lower() == "true"
+            min_content_score=float(os.environ.get("MIN_CONTENT_SCORE", "40.0")),
+            enable_scoring=os.environ.get("ENABLE_SCORING", "true").lower() == "true",
+            require_hard_news=os.environ.get("REQUIRE_HARD_NEWS", "false").lower() == "true",
+            fluff_penalty_multiplier=float(os.environ.get("FLUFF_PENALTY_MULTIPLIER", "1.5"))
         )

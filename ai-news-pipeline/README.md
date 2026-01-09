@@ -177,60 +177,96 @@ settings:
 
 Customize the scriptwriting instructions in `config/prompts/news_script.txt`.
 
-## Content Scoring System
+## Enhanced Content Scoring System
 
-The pipeline includes an intelligent NLP-based scoring system to filter articles for production worthiness. This ensures only engaging, sellable content becomes videos.
+The pipeline includes a sophisticated multi-tier NLP scoring system that filters for genuinely **newsworthy, hard-hitting content** suitable for video production. This aggressive filtering ensures only sellable stories make it through.
 
-### Scoring Dimensions (0-100 scale)
+### News Category Classification
 
-1. **Headline Quality (20%)**: Click-worthiness, emotional appeal, specificity
-   - Length optimization (40-100 chars)
-   - Engaging patterns ("Why...", "How...", numbers, shocking words)
-   - Proper nouns and specificity
+Articles are automatically classified into 3 tiers:
 
-2. **Entity Prominence (20%)**: Notable people, places, organizations
-   - World leaders, major institutions
-   - Conflict zones, major countries
-   - High-impact organizations (UN, NATO, Fed, etc.)
+**Tier 1 - Hard News (+20 bonus):**
+- Politics & Government (elections, legislation, scandals, arrests)
+- Conflicts & Security (war, terrorism, shootings, attacks)
+- Major Disasters (natural disasters, mass casualties, evacuations)
+- Economics & Markets (recession, inflation, market crashes, layoffs)
+- Legal/Judicial (trials, verdicts, Supreme Court, indictments)
+- International Relations (sanctions, treaties, diplomatic crises)
 
-3. **Sentiment Intensity (15%)**: Emotional engagement potential
-   - Polarity strength (strong positive/negative)
-   - Subjectivity level
-   - Uses TextBlob sentiment analysis
+**Tier 2 - Soft News (+10 bonus):**
+- Major Sports (championships, records, major scandals)
+- Science Breakthroughs (cures, major discoveries - not curiosities)
+- Technology (major launches, regulations - not reviews)
+- Health (epidemics, drug approvals - not tips)
 
-4. **Topic Relevance (20%)**: Newsworthy keywords and trending topics
-   - Breaking news, crisis, scandal, investigation
-   - Economy, elections, technology, climate
-   - War, conflict, historic events
+**Tier 3 - Fluff (-30 penalty):**
+- Celebrity gossip & entertainment
+- Animal stories (cute dogs, rescue pets)
+- Lifestyle tips & how-to content
+- Human interest curiosities
+- Minor sports injuries
+- Soft science ("study finds...")
 
-5. **Recency Bonus (10%)**: Time-sensitive content boost
-   - < 2 hours: Full points
-   - 2-24 hours: Gradual decay
-   - > 48 hours: Minimum points
+### Scoring Algorithm
 
-6. **Content Richness (15%)**: Sufficient detail for video production
-   - Article length and depth
-   - Sentence variety
-   - Presence of quotes and details
+**Base Components (50% weight):**
+1. Headline Quality (15%)
+2. Entity Prominence (15%) - World leaders, major institutions
+3. Sentiment Intensity (10%) - Emotional engagement
+4. Recency (10%)
+5. Content Richness (10%)
+
+**Enhanced Components (50% weight):**
+6. **News Category Bonus/Penalty** - Based on tier classification
+7. **Impact & Scale (0-20)** - Global/national reach, mass casualties, economic scope
+8. **Consequence (0-15)** - Policy implications, urgency, irreversibility
+9. **Authority (0-10)** - Government sources, official statements
+10. **Fluff Penalty (0-40)** - Aggressively penalizes non-news content
+
+### Fluff Detection
+
+The system actively penalizes:
+- **Animal fluff** (dogs, cats) - unless attack/death context
+- **Lifestyle content** (tips, recipes, fashion) - heavy penalty
+- **Entertainment** (celebrities, movies) - unless crime/scandal
+- **Soft science** (curiosities, minor studies) - unless breakthrough
+- **Sports injuries** (ankle sprains, rehab) - moderate penalty
+
+**Examples:**
+- ❌ "Chloe Kim injures shoulder" → **Score: ~25** (sports injury + fluff)
+- ❌ "Dogs learn toy names" → **Score: ~20** (animal fluff + soft science)
+- ✅ "Minnesota shooting videos challenge narrative" → **Score: ~75** (conflict + authority)
+- ✅ "Fatal ICE shooting sparks jurisdiction clash" → **Score: ~80** (conflict + policy)
 
 ### Configuration
 
 ```env
-ENABLE_SCORING=true          # Enable/disable scoring filter
-MIN_CONTENT_SCORE=50.0       # Threshold (0-100), default 50
+ENABLE_SCORING=true                    # Enable/disable scoring filter
+MIN_CONTENT_SCORE=60.0                 # Threshold (0-100), default 60
+REQUIRE_HARD_NEWS=false                # If true, reject all non-Tier 1
+FLUFF_PENALTY_MULTIPLIER=1.5          # Harshness (1.0-2.0), 1.5 = reasonably aggressive
 ```
 
 ### How It Works
 
-- Articles scoring **≥ MIN_CONTENT_SCORE** → Status: `SCORED` (proceed to script generation)
-- Articles scoring **< MIN_CONTENT_SCORE** → Status: `SKIPPED` (filtered out)
-- When scoring is disabled, all ingested articles proceed to script generation
+- Articles scoring **≥ 60** → Status: `SCORED` (proceed to script generation)
+- Articles scoring **< 60** → Status: `SKIPPED` (filtered out)
+- Hard news prioritized over soft news over fluff
+- When scoring disabled, all ingested articles proceed
+
+### Expected Filtering Rate
+
+With default settings (60.0 threshold, 1.5 penalty):
+- **~70-80% rejection rate** for general news feeds
+- Majority of rejected: lifestyle, entertainment, minor sports, animal stories
+- Majority accepted: conflicts, policy changes, major disasters, elections
 
 ### Free NLP Tools Used
 
 - **spaCy** (`en_core_web_sm`): Named entity recognition (persons, orgs, places)
 - **TextBlob**: Sentiment analysis (polarity and subjectivity)
-- **Custom heuristics**: Headline patterns, keyword matching, recency calculations
+- **Advanced keyword taxonomy**: 200+ categorized keywords for news classification
+- **Pattern matching**: Regex for mass casualties, urgency, official sources
 
 ## Pipeline Flow
 
@@ -246,15 +282,16 @@ MIN_CONTENT_SCORE=50.0       # Threshold (0-100), default 50
        │                      │
        ▼                      │
 ┌──────────────┐             │
-│ NLP Content  │◀────────────┘
-│   Scorer     │
-│ (TextBlob +  │
-│   spaCy)     │
+│ Enhanced NLP │◀────────────┘
+│Content Scorer│
+│ • Category   │
+│ • Impact     │
+│ • Fluff Det. │
 └──────┬───────┘
        │
-       ├─ Score ≥ 50 ─▶ SCORED
+       ├─ Score ≥ 60 ─▶ SCORED (Hard News Priority)
        │
-       └─ Score < 50 ─▶ SKIPPED
+       └─ Score < 60 ─▶ SKIPPED (Fluff Rejected)
        │
        ▼
 ┌──────────────┐

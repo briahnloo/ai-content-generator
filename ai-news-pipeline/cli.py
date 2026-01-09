@@ -13,7 +13,10 @@ def ingest(limit):
     """Fetch new content from RSS feeds"""
     pipeline = Pipeline(Settings.from_env())
     items = pipeline.ingest(limit)
-    click.echo(f"Ingested {len(items)} items")
+    if len(items) > 0:
+        click.echo(f"✓ Ready to score {len(items)} items. Run: python cli.py score")
+    else:
+        click.echo(f"✗ No new items ingested")
 
 @cli.command()
 @click.option("--limit", default=20, help="Max items to score")
@@ -29,7 +32,12 @@ def script(limit):
     """Generate scripts for scored/ingested content"""
     pipeline = Pipeline(Settings.from_env())
     items = pipeline.generate_scripts(limit)
-    click.echo(f"Generated {len(items)} scripts")
+    if len(items) > 0:
+        click.echo(f"\n{'='*80}")
+        click.echo(f"✓ Successfully generated {len(items)} script(s)")
+        click.echo(f"{'='*80}\n")
+    else:
+        click.echo("\n✗ No scripts generated. Check the output above for details.\n")
 
 @cli.command()
 @click.option("--limit", default=3, help="Max videos to render")
@@ -99,10 +107,35 @@ def status():
     settings = Settings.from_env()
     db = Database(settings.database_path)
 
+    click.echo("\n=== Pipeline Status ===")
+    total = 0
     for s in Status:
         count = len(db.get_by_status(s, limit=1000))
         if count > 0:
-            click.echo(f"{s.value}: {count}")
+            click.echo(f"  {s.value}: {count}")
+            total += count
+
+    if total == 0:
+        click.echo("  (empty)")
+    click.echo(f"  Total: {total}\n")
+
+@cli.command()
+@click.confirmation_option(prompt='Are you sure you want to delete all data?')
+def reset():
+    """Delete database and start fresh"""
+    import os
+    from pathlib import Path
+
+    settings = Settings.from_env()
+    db_path = Path(settings.database_path)
+
+    if db_path.exists():
+        os.remove(db_path)
+        click.echo(f"✓ Deleted database: {db_path}")
+    else:
+        click.echo(f"Database doesn't exist: {db_path}")
+
+    click.echo("\nRun 'python cli.py ingest' to fetch new articles.")
 
 if __name__ == "__main__":
     cli()
