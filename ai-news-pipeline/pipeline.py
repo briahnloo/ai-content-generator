@@ -104,7 +104,19 @@ class Pipeline:
                     item.status = Status.SCORED
                     self.db.save(item)
                     category = breakdown.get('news_category', 'N/A')
-                    print(f"✓ [SCORED] {score:.1f}/100 [{category}] {item.title[:55]}...")
+
+                    # Build scoring transparency string
+                    context = int(breakdown.get('context_worthiness', 0))
+                    systemic = int(breakdown.get('systemic_impact', 0))
+                    cat_bonus = int(breakdown.get('category_bonus', 0))
+
+                    detail_str = f"+{cat_bonus}tier"
+                    if context > 0:
+                        detail_str += f" +{context}context"
+                    if systemic > 0:
+                        detail_str += f" +{systemic}impact"
+
+                    print(f"✓ [SCORED] {score:.1f}/100 [{category}] {detail_str}: {item.title[:45]}...")
                     scored.append(item)
                 else:
                     item.status = Status.SKIPPED

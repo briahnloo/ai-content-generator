@@ -19,6 +19,7 @@ except OSError:
 
 class NewsTier(Enum):
     """News category tiers for content classification"""
+    CRITICAL = 0       # Systemic political/economic events with global impact
     HARD_NEWS = 1      # Politics, conflict, economics, disasters
     SOFT_NEWS = 2      # Major sports, tech, science breakthroughs
     FLUFF = 3          # Entertainment, lifestyle, curiosities
@@ -86,6 +87,73 @@ class ContentScorer:
         'treaty', 'summit', 'alliance', 'nato', 'un', 'trade deal',
         'diplomatic', 'ambassador', 'foreign minister', 'g7', 'g20',
         'coalition', 'smuggle', 'separatist', 'rebels', 'militants'
+    }
+
+    # === ENHANCED POLITICAL KEYWORDS (Priority for political/economic focus) ===
+
+    GOVERNANCE_KEYWORDS = {
+        'legislation', 'constitutional', 'sovereignty', 'regime change',
+        'referendum', 'democracy', 'authoritarian', 'parliament', 'congress',
+        'senate', 'house', 'veto', 'override', 'filibuster', 'amendment'
+    }
+
+    GEOPOLITICS_KEYWORDS = {
+        'alliance', 'sanctions', 'diplomatic', 'treaty', 'territorial',
+        'military aid', 'defense pact', 'trade bloc', 'embargo', 'blockade',
+        'annexation', 'occupation', 'peacekeeping', 'ceasefire', 'escalation'
+    }
+
+    CONFLICT_ESCALATION_KEYWORDS = {
+        'civil unrest', 'refugees', 'humanitarian crisis', 'genocide',
+        'ethnic cleansing', 'war crimes', 'displacement', 'asylum',
+        'peacekeepers', 'intervention', 'retaliation', 'offensive'
+    }
+
+    # === ENHANCED ECONOMIC KEYWORDS (Trade, markets, labor, monetary) ===
+
+    TRADE_KEYWORDS = {
+        'trade war', 'supply chain', 'export ban', 'trade agreement',
+        'protectionism', 'free trade', 'customs', 'duties', 'quota',
+        'import', 'export', 'trade deficit', 'trade surplus', 'wto'
+    }
+
+    MARKETS_KEYWORDS = {
+        'stock crash', 'banking crisis', 'default', 'debt ceiling',
+        'credit rating', 'bond market', 'yield', 'treasury', 'securities',
+        'derivatives', 'hedge fund', 'bailout', 'liquidity', 'solvency'
+    }
+
+    LABOR_KEYWORDS = {
+        'strike', 'wage', 'labor shortage', 'automation', 'income inequality',
+        'minimum wage', 'collective bargaining', 'union', 'workforce',
+        'gig economy', 'freelance', 'contract worker', 'pension', 'benefits'
+    }
+
+    MONETARY_KEYWORDS = {
+        'interest rate', 'federal reserve', 'ecb', 'central bank',
+        'monetary policy', 'quantitative easing', 'inflation target',
+        'deflation', 'stagflation', 'currency', 'exchange rate', 'forex',
+        'dollar', 'euro', 'yuan', 'devaluation', 'appreciation'
+    }
+
+    # === CONTEXT-WORTHINESS INDICATORS ===
+
+    HISTORICAL_PRECEDENT_KEYWORDS = {
+        'first time since', 'unprecedented', 'historic', 'landmark',
+        'never before', 'milestone', 'record', 'breakthrough', 'turning point',
+        'watershed', 'pivotal', 'since the', 'decades', 'century'
+    }
+
+    ANALYTICAL_DEPTH_KEYWORDS = {
+        'data shows', 'statistics', 'percent', 'percentage', '%', 'analysis',
+        'study', 'report', 'findings', 'research', 'survey', 'poll results',
+        'according to', 'experts say', 'economists', 'analysts'
+    }
+
+    POLICY_MECHANISM_KEYWORDS = {
+        'implements', 'enforcement', 'compliance', 'regulatory framework',
+        'legal mechanism', 'judicial review', 'oversight', 'accountability',
+        'transparency', 'disclosure', 'mandate', 'requirement', 'stipulation'
     }
 
     # === TIER 3: FLUFF INDICATORS ===
@@ -210,6 +278,8 @@ class ContentScorer:
         impact_score = self._score_impact_scale(text_combined)
         consequence_score = self._score_consequence(text_combined)
         authority_score = self._score_authority(text_combined)
+        context_score = self._score_context_worthiness(text_combined)
+        systemic_score = self._score_systemic_impact(text_combined)
 
         # Only apply fluff penalty to FLUFF tier content, not hard news
         if news_tier == NewsTier.FLUFF:
@@ -217,22 +287,24 @@ class ContentScorer:
         else:
             fluff_penalty = 0.0
 
-        # Combine base score (normalize to ~40 point contribution)
-        # Max possible: 20+20+15+10+15 = 80, scale to ~40
+        # Combine base score (normalize to ~30 point contribution)
+        # Max possible: 20+20+15+10+15 = 80, scale to ~30
         base_score = (
-            base_breakdown['headline_quality'] * 0.5 +      # 0-20 → 0-10
-            base_breakdown['entity_prominence'] * 0.5 +     # 0-20 → 0-10
-            base_breakdown['sentiment_intensity'] * 0.67 +  # 0-15 → 0-10
-            base_breakdown['recency'] * 0.5 +               # 0-10 → 0-5
-            base_breakdown['content_richness'] * 0.33       # 0-15 → 0-5
-        )  # Total: 0-40
+            base_breakdown['headline_quality'] * 0.4 +      # 0-20 → 0-8
+            base_breakdown['entity_prominence'] * 0.4 +     # 0-20 → 0-8
+            base_breakdown['sentiment_intensity'] * 0.5 +   # 0-15 → 0-7.5
+            base_breakdown['recency'] * 0.35 +              # 0-10 → 0-3.5
+            base_breakdown['content_richness'] * 0.2        # 0-15 → 0-3
+        )  # Total: 0-30
 
-        # Add enhanced components (~60 point contribution)
+        # Add enhanced components (~70 point contribution)
         enhanced_score = (
-            category_bonus +           # -30 to +20
+            category_bonus +           # -30 to +30 (CRITICAL gets 40)
             impact_score +             # 0-20
             consequence_score +        # 0-15
-            authority_score -          # 0-10
+            authority_score +          # 0-10
+            context_score +            # 0-20 (NEW)
+            systemic_score -           # 0-15 (NEW)
             (fluff_penalty * self.fluff_penalty_multiplier)  # 0 to -60
         )
 
@@ -248,6 +320,8 @@ class ContentScorer:
             'impact_scale': impact_score,
             'consequence': consequence_score,
             'authority': authority_score,
+            'context_worthiness': context_score,
+            'systemic_impact': systemic_score,
             'fluff_penalty': -fluff_penalty * self.fluff_penalty_multiplier,
             'base_score': round(base_score, 2),
             'enhanced_score': round(enhanced_score, 2)
@@ -257,7 +331,7 @@ class ContentScorer:
 
     def _classify_news_category(self, text: str) -> NewsTier:
         """
-        Classify content into news tiers: Hard News, Soft News, or Fluff.
+        Classify content into news tiers: Critical, Hard News, Soft News, or Fluff.
 
         Args:
             text: Combined title + content (lowercase)
@@ -268,29 +342,52 @@ class ContentScorer:
         # Check for hard news indicators (Tier 1)
         hard_news_score = 0
 
-        # Conflict/violence
+        # Conflict/violence (core hard news)
         hard_news_score += sum(3 for kw in self.CONFLICT_KEYWORDS if kw in text)
 
-        # Crisis/disaster
+        # Crisis/disaster (core hard news)
         hard_news_score += sum(3 for kw in self.CRISIS_KEYWORDS if kw in text)
 
-        # Death/casualties
+        # Death/casualties (highest priority)
         hard_news_score += sum(4 for kw in self.DEATH_KEYWORDS if kw in text)
 
-        # Government action
+        # Government action (core political)
         hard_news_score += sum(3 for kw in self.GOVERNMENT_ACTION_KEYWORDS if kw in text)
 
-        # Economics (major)
+        # Economics (major) - original
         hard_news_score += sum(2 for kw in self.ECONOMICS_KEYWORDS if kw in text)
 
-        # Policy/legal
+        # Policy/legal - original
         hard_news_score += sum(2 for kw in self.POLICY_KEYWORDS if kw in text)
 
-        # Elections
+        # Elections - original
         hard_news_score += sum(2 for kw in self.ELECTION_KEYWORDS if kw in text)
 
-        # International relations
+        # International relations - original
         hard_news_score += sum(2 for kw in self.INTERNATIONAL_KEYWORDS if kw in text)
+
+        # === NEW ENHANCED POLITICAL/ECONOMIC KEYWORDS ===
+
+        # Governance (political priority)
+        hard_news_score += sum(3 for kw in self.GOVERNANCE_KEYWORDS if kw in text)
+
+        # Geopolitics (high priority)
+        hard_news_score += sum(3 for kw in self.GEOPOLITICS_KEYWORDS if kw in text)
+
+        # Conflict escalation (high priority)
+        hard_news_score += sum(4 for kw in self.CONFLICT_ESCALATION_KEYWORDS if kw in text)
+
+        # Trade (economic priority)
+        hard_news_score += sum(3 for kw in self.TRADE_KEYWORDS if kw in text)
+
+        # Markets (economic priority)
+        hard_news_score += sum(3 for kw in self.MARKETS_KEYWORDS if kw in text)
+
+        # Labor (economic priority)
+        hard_news_score += sum(2 for kw in self.LABOR_KEYWORDS if kw in text)
+
+        # Monetary policy (economic priority)
+        hard_news_score += sum(3 for kw in self.MONETARY_KEYWORDS if kw in text)
 
         # Check for fluff indicators (Tier 3)
         fluff_score = 0
@@ -301,14 +398,40 @@ class ContentScorer:
         fluff_score += sum(3 for kw in self.SOFT_SCIENCE_FLUFF if kw in text)
         fluff_score += sum(2 for kw in self.SPORTS_MINOR if kw in text)
 
-        # Decision logic (more permissive thresholds)
-        if hard_news_score >= 4:  # Lowered from 6
+        # Check for CRITICAL tier indicators (systemic importance)
+        critical_indicators = 0
+
+        # Multiple countries/regions mentioned (global significance)
+        country_patterns = [
+            r'\bchina\b', r'\brussia\b', r'\bus\b', r'\busa\b', r'\beurope\b',
+            r'\bindia\b', r'\bjapan\b', r'\bgermany\b', r'\bfrance\b', r'\buk\b'
+        ]
+        country_count = sum(1 for pattern in country_patterns if re.search(pattern, text, re.IGNORECASE))
+        if country_count >= 3:
+            critical_indicators += 2
+
+        # Historical precedent (landmark events)
+        if any(kw in text for kw in self.HISTORICAL_PRECEDENT_KEYWORDS):
+            critical_indicators += 1
+
+        # Large scale economic figures
+        if re.search(r'\$\d+\s*(?:billion|trillion)\b', text, re.IGNORECASE):
+            critical_indicators += 1
+
+        # Systemic language
+        if any(kw in text for kw in ['systemic', 'global', 'worldwide', 'international crisis']):
+            critical_indicators += 1
+
+        # Decision logic (prioritize CRITICAL, then HARD_NEWS)
+        if hard_news_score >= 12 and critical_indicators >= 2:
+            return NewsTier.CRITICAL
+        elif hard_news_score >= 6:
             return NewsTier.HARD_NEWS
-        elif fluff_score >= 6:  # Raised from 4 to be less aggressive
+        elif fluff_score >= 6:
             return NewsTier.FLUFF
-        elif hard_news_score >= 2:  # Lowered from 3
+        elif hard_news_score >= 3:
             return NewsTier.SOFT_NEWS
-        elif fluff_score >= 3:  # Raised from 2
+        elif fluff_score >= 3:
             return NewsTier.FLUFF
         else:
             # Default to soft news for ambiguous cases
@@ -316,12 +439,14 @@ class ContentScorer:
 
     def _get_category_bonus(self, tier: NewsTier) -> float:
         """Get bonus/penalty based on news tier."""
-        if tier == NewsTier.HARD_NEWS:
-            return 30.0  # Increased from 20 to ensure hard news passes
+        if tier == NewsTier.CRITICAL:
+            return 40.0  # Systemic political/economic events
+        elif tier == NewsTier.HARD_NEWS:
+            return 30.0  # Significant news events
         elif tier == NewsTier.SOFT_NEWS:
-            return 15.0  # Increased from 10
+            return 15.0  # Lower priority news
         else:  # FLUFF
-            return -30.0
+            return -30.0  # Reject fluff content
 
     def _score_impact_scale(self, text: str) -> float:
         """
@@ -382,6 +507,80 @@ class ContentScorer:
         score += min(authority_count * 2.5, 10)
 
         return min(score, 10.0)
+
+    def _score_context_worthiness(self, text: str) -> float:
+        """
+        Score articles that provide deeper context and insights (0-20 points).
+
+        Evaluates: historical precedent, analytical depth, policy mechanisms,
+        multi-country scope - indicators that this story deserves explanation.
+        """
+        score = 0.0
+
+        # Historical precedent (7 points max) - "first time since", "unprecedented"
+        historical_count = sum(1 for kw in self.HISTORICAL_PRECEDENT_KEYWORDS if kw in text)
+        score += min(historical_count * 3.5, 7)
+
+        # Analytical depth (6 points max) - data, statistics, expert analysis
+        analytical_count = sum(1 for kw in self.ANALYTICAL_DEPTH_KEYWORDS if kw in text)
+        score += min(analytical_count * 2, 6)
+
+        # Policy mechanisms (4 points max) - how policies actually work
+        policy_count = sum(1 for kw in self.POLICY_MECHANISM_KEYWORDS if kw in text)
+        score += min(policy_count * 2, 4)
+
+        # Multiple countries mentioned (3 points max) - indicates systemic/global significance
+        # Count country/region mentions (simple heuristic)
+        country_patterns = [
+            r'\bchina\b', r'\brussia\b', r'\bus\b', r'\busa\b', r'\beurope\b',
+            r'\bindia\b', r'\bjapan\b', r'\bgermany\b', r'\bfrance\b', r'\buk\b',
+            r'\bcanada\b', r'\bmexico\b', r'\bbrazil\b', r'\bafrica\b', r'\basia\b'
+        ]
+        country_count = sum(1 for pattern in country_patterns if re.search(pattern, text, re.IGNORECASE))
+        if country_count >= 3:
+            score += 3
+        elif country_count == 2:
+            score += 2
+
+        return min(score, 20.0)
+
+    def _score_systemic_impact(self, text: str) -> float:
+        """
+        Score articles about broad societal/economic impacts (0-15 points).
+
+        Evaluates: scale indicators (millions, billions), economic figures,
+        widespread/industry-wide language - things that affect many people.
+        """
+        score = 0.0
+
+        # Scale indicators (6 points max) - "millions", "billions", "widespread"
+        scale_patterns = [
+            r'\b\d+\s*(?:million|billion|trillion)\b',
+            r'\bmillions?\s+of\s+(?:people|workers|families|citizens)\b',
+            r'\b(?:widespread|nationwide|industry-wide|sector-wide|global)\b'
+        ]
+        scale_matches = sum(1 for pattern in scale_patterns if re.search(pattern, text, re.IGNORECASE))
+        score += min(scale_matches * 3, 6)
+
+        # Economic figures in headline or content (4 points max)
+        economic_figures = [
+            r'\$\d+\s*(?:million|billion|trillion)\b',
+            r'\b\d+%\b',  # Percentages
+            r'\b\d+\.\d+%\b'  # Decimal percentages
+        ]
+        econ_matches = sum(1 for pattern in economic_figures if re.search(pattern, text, re.IGNORECASE))
+        score += min(econ_matches * 2, 4)
+
+        # Systemic language (5 points max)
+        systemic_keywords = {
+            'economy', 'economic', 'financial system', 'market', 'industry',
+            'sector', 'supply chain', 'infrastructure', 'public health',
+            'climate', 'environment', 'population', 'society', 'systemic'
+        }
+        systemic_count = sum(1 for kw in systemic_keywords if kw in text)
+        score += min(systemic_count * 2.5, 5)
+
+        return min(score, 15.0)
 
     def _detect_fluff_penalty(self, text: str, title: str) -> float:
         """
